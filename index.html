@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RSEScore – Test Prototype</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<div class="container py-5">
+    <h1 class="text-center mb-4">RSEScore – Demo</h1>
+
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div id="loadingStatus" class="alert alert-info d-flex align-items-center">
+                        <div id="loadingSpinner" class="spinner-border spinner-border-sm text-primary me-2 visually-hidden" role="status" aria-hidden="true"></div>
+                        <div id="loadingText">⏳ Loading scripts...</div>
+                    </div>
+
+                    <label for="userInput" class="form-label">Input Terms & Conditions</label>
+                    <textarea id="userInput" class="form-control" placeholder="Paste terms or text here" rows="4"></textarea>
+                    
+                    <div class="mb-3">
+                        <label for="urlInput" class="form-label">Input T&C URL</label>
+                        <div class="input-group">
+                          <input type="url" id="urlInput" class="form-control" placeholder="https://example.com">
+                          <button id="fetchUrlBtn" class="btn btn-outline-primary">Fetch & Analyze</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="fileInput" class="form-label">Upload T&C File</label>
+                        <div class="input-group">
+                          <input type="file" id="fileInput" class="form-control" accept=".txt,.html,.htm,text/plain,text/html">
+                          <button id="analyzeFileBtn" class="btn btn-outline-secondary">Analyze File</button>
+                        </div>
+                    </div>
+
+                    <div class="d-grid mt-3">
+                        <button id="analyzeBtn" class="btn btn-warning">Analyze Text</button>
+                    </div>
+
+                    <div id="result" class="mt-4 d-none">
+                        <div id="scoreHeader" class="mb-3">
+                            <div id="scoreDisplay" class="h3"></div>
+                            <div id="marcusSpeech" class="alert alert-warning d-none"></div>
+                        </div>
+
+                    
+                        <div id="responseContent" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+console.log('📄 index.html script loaded');
+
+// ===============================
+// Simple scoring prototype inline
+// ===============================
+
+async function query(data) {
+	const response = await fetch(
+		"https://router.huggingface.co/v1/chat/completions",
+		{
+			headers: {
+				Authorization: `Bearer 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`,
+				"Content-Type": "application/json",
+			},
+			method: "POST",
+			body: JSON.stringify(data),
+		}
+	);
+	const result = await response.json();
+	return result;
+}
+
+// Update loading status when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+        console.log('🎨 DOM loaded, updating status...');
+        const statusDiv = document.getElementById('loadingStatus');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const loadingText = document.getElementById('loadingText');
+        // show script-loaded text, spinner hidden
+        if (loadingSpinner) loadingSpinner.classList.add('visually-hidden');
+        if (loadingText) loadingText.textContent = '✅ Scripts loaded successfully!';
+
+        // Attach event listeners to buttons
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        if (analyzeBtn) analyzeBtn.addEventListener('click', runAnalysis);
+        const fetchUrlBtn = document.getElementById('fetchUrlBtn');
+        if (fetchUrlBtn) fetchUrlBtn.addEventListener('click', analyzeUrl);
+        const analyzeFileBtn = document.getElementById('analyzeFileBtn');
+        if (analyzeFileBtn) analyzeFileBtn.addEventListener('click', analyzeFile);
+
+        // Optional: submit on Ctrl+Enter inside textarea
+        const userInputEl = document.getElementById('userInput');
+        if (userInputEl) {
+            userInputEl.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    runAnalysis();
+                }
+            });
+        }
+});
+
+//TODO: Read file input and convert to text
+//TODO: Manipulate user input 
+
+// Helper functions for loading state
+function showLoading() {
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const loadingText = document.getElementById('loadingText');
+    const analyzeBtnEl = document.getElementById('analyzeBtn');
+    const fetchUrlBtn = document.getElementById('fetchUrlBtn');
+    const analyzeFileBtn = document.getElementById('analyzeFileBtn');
+    if (loadingSpinner) loadingSpinner.classList.remove('visually-hidden');
+    if (loadingText) loadingText.textContent = '⏳ Analyzing...';
+    if (analyzeBtnEl) analyzeBtnEl.disabled = true;
+    if (fetchUrlBtn) fetchUrlBtn.disabled = true;
+    if (analyzeFileBtn) analyzeFileBtn.disabled = true;
+}
+
+function hideLoading() {
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const loadingText = document.getElementById('loadingText');
+    const analyzeBtnEl = document.getElementById('analyzeBtn');
+    const fetchUrlBtn = document.getElementById('fetchUrlBtn');
+    const analyzeFileBtn = document.getElementById('analyzeFileBtn');
+    if (loadingSpinner) loadingSpinner.classList.add('visually-hidden');
+    if (loadingText) loadingText.textContent = '✅ Scripts loaded successfully!';
+    if (analyzeBtnEl) analyzeBtnEl.disabled = false;
+    if (fetchUrlBtn) fetchUrlBtn.disabled = false;
+    if (analyzeFileBtn) analyzeFileBtn.disabled = false;
+}
+
+function normalizeUrl(input) {
+    if (!input) return null;
+    try {
+        const u = new URL(input);
+        return u.href;
+    } catch (e) {
+        try {
+            const u = new URL('https://' + input);
+            return u.href;
+        } catch (e2) {
+            return null;
+        }
+    }
+}
+
+async function fetchTermsFromUrl(url) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Network response was not ok');
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+
+        // Try to find an explicit "terms" link
+        const anchors = Array.from(doc.querySelectorAll('a'));
+        const termsAnchor = anchors.find(a => /term|conditions|terms-of-service|terms_and_conditions|terms-conditions|privacy/i.test((a.getAttribute('href') || '') + ' ' + (a.textContent || '')));
+        if (termsAnchor) {
+            const href = termsAnchor.getAttribute('href');
+            const full = new URL(href, url).href;
+            const r2 = await fetch(full);
+            const html2 = await r2.text();
+            const doc2 = new DOMParser().parseFromString(html2, 'text/html');
+            return doc2.body.innerText;
+        }
+
+        // If no explicit link, try to locate "terms" in page text
+        const bodyText = doc.body.innerText || '';
+        const idx = bodyText.search(/terms and conditions|terms of service|terms/i);
+        if (idx >= 0) {
+            // return a generous slice around the detected index
+            return bodyText.substring(Math.max(0, idx - 200), Math.min(bodyText.length, idx + 20000));
+        }
+
+        // fallback to full page text
+        return bodyText;
+    } catch (err) {
+        console.error('fetchTermsFromUrl error', err);
+        alert('Could not fetch the URL (possible CORS or network error). If this happens often, paste the text or use a server-side proxy.');
+        return null;
+    }
+}
+
+async function analyzeText(userInput) {
+    if (!userInput || !userInput.trim()) return;
+    showLoading();
+
+    const prompt = `
+    You are an expert auditor evaluating Terms & Conditions for transparency, user protection, and RSE (Responsabilité Sociétale des Entreprises) compliance.
+
+Your task:
+Given ANY terms and conditions text, analyze it and return a JSON object with the following fields:
+
+{
+  "global_score": 0-10,
+  "metrics": {
+    "transparency_score": 0-10,
+    "transparency_explanation": "one sentences",
+    "privacy_score": 0-10,
+    "privacy_explanation": "one sentences",
+    "data_collection_score": 0-10,
+    "data_collection_explanation": "one sentences",
+    "user_rights_score": 0-10,
+    "user_rights_explanation": "one sentences",
+    "child_safety_score": 0-10,
+    "child_safety_explanation": "one sentences",
+    "third_parties_score": 0-10,
+    "third_parties_explanation": "one sentences"
+  },
+  "summary": "One friendly, kid-understandable sentence explaining if the website respects users."
+}
+
+Scoring rules:
+- 10 = excellent, safe, transparent, respectful
+- 5 = acceptable but with concerns
+- 0 = dangerous, unclear, abusive, or deceptive
+
+Be factual, concise, and unbiased.
+Do NOT invent content not present in the text. If information is missing, give a low score and say \"information not provided\".
+
+    `;
+
+    try {
+        const response = await query({
+            messages: [
+                { role: 'system', content: prompt },
+                { role: 'user', content: userInput }
+            ],
+            model: 'deepseek-ai/DeepSeek-V3.2:novita'
+        });
+
+        const resultDiv = document.getElementById('result');
+        const responseText = response.choices?.[0]?.message?.content || 'No response';
+
+        try {
+            // Extract JSON from markdown code blocks if present
+            let jsonString = responseText;
+            const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (jsonMatch && jsonMatch[1]) {
+                jsonString = jsonMatch[1].trim();
+                console.log('📦 Extracted JSON from markdown code block');
+            }
+
+            const jsonResponse = JSON.parse(jsonString);
+
+            // Format and display the response using Bootstrap classes
+            const responseDiv = document.getElementById('responseContent');
+            let htmlContent = '';
+
+            if (jsonResponse.global_score !== undefined) {
+                const scoreClass = jsonResponse.global_score >= 7 ? 'alert-success' : jsonResponse.global_score >= 5 ? 'alert-warning' : 'alert-danger';
+                htmlContent += `<div class="alert ${scoreClass} text-center"><h2 class="mb-0">Global Score: ${jsonResponse.global_score}/10</h2></div>`;
+                document.getElementById('scoreDisplay').textContent = `Score: ${jsonResponse.global_score}/10`;
+            } else {
+                document.getElementById('scoreDisplay').textContent = '';
+            }
+
+            if (jsonResponse.metrics) {
+                const metricsMap = {
+                    'transparency': { title: '🔍 Transparency', scoreKey: 'transparency_score', explKey: 'transparency_explanation' },
+                    'privacy': { title: '🔒 Privacy', scoreKey: 'privacy_score', explKey: 'privacy_explanation' },
+                    'data_collection': { title: '📊 Data Collection', scoreKey: 'data_collection_score', explKey: 'data_collection_explanation' },
+                    'user_rights': { title: '👤 User Rights', scoreKey: 'user_rights_score', explKey: 'user_rights_explanation' },
+                    'child_safety': { title: '👶 Child Safety', scoreKey: 'child_safety_score', explKey: 'child_safety_explanation' },
+                    'third_parties': { title: '🔗 Third Parties', scoreKey: 'third_parties_score', explKey: 'third_parties_explanation' }
+                };
+
+                htmlContent += `<div class="accordion" id="metricsAccordion">`;
+                for (const [key, config] of Object.entries(metricsMap)) {
+                    const score = jsonResponse.metrics[config.scoreKey];
+                    const explanation = jsonResponse.metrics[config.explKey];
+                    if (score !== undefined && explanation !== undefined) {
+                        const badgeClass = score >= 7 ? 'bg-success text-white' : score >= 5 ? 'bg-warning text-dark' : 'bg-danger text-white';
+                        const headerId = `heading-${config.scoreKey}`;
+                        const collapseId = `collapse-${config.scoreKey}`;
+
+                        htmlContent += `
+                        <div class="accordion-item">
+                          <h2 class="accordion-header" id="${headerId}">
+                            <button class="accordion-button collapsed d-flex justify-content-between align-items-center" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="false" aria-controls="${collapseId}">
+                              <span>${config.title}</span>
+                              <span class="badge ${badgeClass} rounded-pill ms-3">${score}/10</span>
+                            </button>
+                          </h2>
+                          <div id="${collapseId}" class="accordion-collapse collapse" aria-labelledby="${headerId}" data-bs-parent="#metricsAccordion">
+                            <div class="accordion-body">
+                              ${explanation}
+                            </div>
+                          </div>
+                        </div>
+                        `;
+                    }
+                }
+                htmlContent += `</div>`;
+            }
+
+            if (jsonResponse.summary) {
+                htmlContent += `<div class="alert alert-info mt-3"><strong>📌 Summary:</strong> ${jsonResponse.summary}</div>`;
+            }
+
+            responseDiv.innerHTML = htmlContent;
+            console.log('✅ JSON response formatted and displayed successfully');
+
+        } catch (parseError) {
+            console.warn('Could not parse as JSON, rendering as markdown:', parseError);
+            const responseDiv = document.getElementById('responseContent');
+            responseDiv.innerHTML = marked.parse(responseText);
+        }
+
+        resultDiv.classList.remove('d-none');
+    } catch (err) {
+        console.error('analyzeText error', err);
+        alert('Error during analysis. See console for details.');
+    } finally {
+        hideLoading();
+    }
+}
+
+function runAnalysis() {
+    const userInput = document.getElementById('userInput').value;
+    analyzeText(userInput);
+}
+
+// Analyze URL input
+async function analyzeUrl() {
+    const raw = document.getElementById('urlInput').value;
+    const normalized = normalizeUrl(raw);
+    if (!normalized) {
+        alert('Please enter a valid URL (include protocol or use domain like example.com).');
+        return;
+    }
+    showLoading();
+    try {
+        const termsText = await fetchTermsFromUrl(normalized);
+        if (termsText) {
+            // optionally show fetched snippet in textarea
+            document.getElementById('userInput').value = termsText.slice(0, 1000);
+            await analyzeText(termsText);
+        }
+    } finally {
+        hideLoading();
+    }
+}
+
+// Analyze uploaded file
+function analyzeFile() {
+    const input = document.getElementById('fileInput');
+    if (!input || !input.files || input.files.length === 0) {
+        alert('Please select a file to analyze.');
+        return;
+    }
+    const file = input.files[0];
+    const name = (file.name || '').toLowerCase();
+    if (name.endsWith('.pdf') || name.endsWith('.docx')) {
+        alert('PDF and DOCX are not supported in-browser. Please extract text or use TXT/HTML.');
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        // If file is HTML, try to extract T&C portion
+        if ((name.endsWith('.html') || name.endsWith('.htm')) || /<\/?html/i.test(text)) {
+            const doc = new DOMParser().parseFromString(text, 'text/html');
+            const bodyText = doc.body ? doc.body.innerText : text;
+            document.getElementById('userInput').value = bodyText.slice(0, 1000);
+            analyzeText(bodyText);
+        } else {
+            document.getElementById('userInput').value = text.slice(0, 1000);
+            analyzeText(text);
+        }
+    };
+    reader.readAsText(file);
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+
+</body>
+</html>
